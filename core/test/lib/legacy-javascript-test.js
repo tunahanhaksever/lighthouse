@@ -94,6 +94,10 @@ describe('detectLegacyJavaScript', () => {
       'no(Object,{entries:r},{entries:function',
       'no(Array.prototype,{findLast:r},{findLast:function',
 
+      // Unminified / bundler module names (single/double quotes and secondary esnext modules)
+      'require(\'core-js/modules/es.string.repeat.js\')',
+      'require("core-js/modules/esnext.array.at.js")',
+
       // Class polyfills.
       // Currently not used. See create-polyfill-module-data.js
       // 'Object.defineProperty(window, \'WeakSet\', function() {})',
@@ -118,6 +122,12 @@ describe('detectLegacyJavaScript', () => {
       'var n=new Error(h.apply(void 0,[d].concat(f)));n.name="Invariant Violation";',
       'var b=typeof Map==="function"?new Map():void 0',
       'd.Promise=s;var y,g,v,b=function(n,o,t){if(function(t){if("function"!=typeof t)th',
+      'MyArray.prototype.fill = function() {}',
+      'CustomObject.assign = function() {}',
+      'd.Object.assign = function() {}',
+      'ArrayXprototype.fill = function() {}',
+      'no(Object,{is:r},{isNotPolyfill:function',
+      'e({target:"Array",proto:!0},{reverse:1}),foo({a:1},{fill:2})',
     ];
     const variants = createVariants(codeSnippets);
     const scripts = variants.map((code, i) => {
@@ -125,6 +135,31 @@ describe('detectLegacyJavaScript', () => {
     });
     const results = getResults(scripts);
     expect(results).toHaveLength(0);
+  });
+
+  it('does not swallow adjacent polyfills in comma-joined minified code', () => {
+    const results = getResults([
+      {
+        code: 'e({target:"Array",proto:!0},{fill:1}),e({target:"Array",proto:!0},{at:2})',
+      },
+      {
+        code: [
+          'no(Object,{entries:r},{entries:function(){}})',
+          'String.prototype.repeat=function(){}',
+          'no(Object,{entries:r},{entries:function(){}})',
+        ].join(','),
+      },
+    ]);
+
+    expect(results).toHaveLength(2);
+    expect(results[0].matches).toEqual([
+      {name: 'Array.prototype.at', line: 0, column: 40},
+      {name: 'Array.prototype.fill', line: 0, column: 2},
+    ]);
+    expect(results[1].matches).toEqual([
+      {name: 'Object.entries', line: 0, column: 2},
+      {name: 'String.prototype.repeat', line: 0, column: 46},
+    ]);
   });
 
   it('uses source maps to identify polyfills', () => {

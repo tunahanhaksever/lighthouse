@@ -93,17 +93,18 @@ class CodePatternMatcher {
 /**
  * @param {string?} object
  * @param {string} property
- * @param {string} coreJs3Module
+ * @param {string[]} coreJs3Modules
  */
-function buildPolyfillExpression(object, property, coreJs3Module) {
+function buildPolyfillExpression(object, property, coreJs3Modules) {
   const qt = (/** @type {string} */ token) =>
     `['"]${token}['"]`; // don't worry about matching string delims
+  const escapedObject = object ? object.replaceAll('.', '\\.') : null;
 
   let expression = '';
 
-  if (object) {
+  if (escapedObject) {
     // String.prototype.startsWith =
-    expression += `${object}\\.${property}\\s?=[^=]`;
+    expression += `(?<![\\w$.])${escapedObject}\\.${property}\\s?=[^=]`;
   } else {
     // Promise =
     // window.Promise =// Promise =Z
@@ -112,17 +113,17 @@ function buildPolyfillExpression(object, property, coreJs3Module) {
   }
 
   // String.prototype['startsWith'] =
-  if (object) {
-    expression += `|${object}\\[${qt(property)}\\]\\s?=[^=]`;
+  if (escapedObject) {
+    expression += `|(?<![\\w$.])${escapedObject}\\[${qt(property)}\\]\\s?=[^=]`;
   }
 
   // Object.defineProperty(String.prototype, 'startsWith'
-  expression += `|defineProperty\\(${object || 'window'},\\s?${qt(property)}`;
+  expression += `|defineProperty\\(${escapedObject || 'window'},\\s?${qt(property)}`;
 
   // es-shims
   // no(Object,{entries:r},{entries:function
-  if (object) {
-    expression += `|\\(${object},\\s*{${property}:.*},\\s*{${property}`;
+  if (escapedObject) {
+    expression += `|\\(${escapedObject},\\s*{${property}:[^}]*},\\s*{${property}:`;
   }
 
   // core-js
@@ -137,7 +138,7 @@ function buildPolyfillExpression(object, property, coreJs3Module) {
     // core-js@3 minified pattern.
     // {target:"Array",proto:true},{fill:fill
     // {target:"Array",proto:true,forced:!HAS_SPECIES_SUPPORT||!USES_TO_LENGTH},{filter:
-    expression += `|{target:${qt(objectWithoutPrototype)}[^;]*},{${property}:`;
+    expression += `|{target:${qt(objectWithoutPrototype)}(?:(?!},{)[^;])*},{${property}:`;
   } else {
     // Detect polyfills for new classes: Map, Set, WeakSet, etc.
     // TODO: so far, no class polyfills are enabled for detection.
@@ -149,7 +150,9 @@ function buildPolyfillExpression(object, property, coreJs3Module) {
 
   // Un-minified code may have module names.
   // core-js/modules/es.object.is-frozen
-  expression += `|${coreJs3Module.replaceAll('.', '\\.')}(?:\\.js)?"`;
+  for (const coreJs3Module of coreJs3Modules) {
+    expression += `|${coreJs3Module.replaceAll('.', '\\.')}(?:\\.js)?['"]`;
+  }
 
   return expression;
 }
@@ -159,6 +162,7 @@ function getCoreJsPolyfillData() {
     return {
       name: d.name,
       coreJs3Module: d.modules[0],
+      coreJs3Modules: d.modules,
     };
   });
 }
@@ -170,13 +174,13 @@ function getPolyfillPatterns() {
   /** @type {Pattern[]} */
   const patterns = [];
 
-  for (const {name, coreJs3Module} of getCoreJsPolyfillData()) {
+  for (const {name, coreJs3Modules} of getCoreJsPolyfillData()) {
     const parts = name.split('.');
     const object = parts.length > 1 ? parts.slice(0, parts.length - 1).join('.') : null;
     const property = parts[parts.length - 1];
     patterns.push({
       name,
-      expression: buildPolyfillExpression(object, property, coreJs3Module),
+      expression: buildPolyfillExpression(object, property, coreJs3Modules),
     });
   }
 
